@@ -1,0 +1,575 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: |
+  Family Tree Management — Serverless application on AWS. Chi phí ~$0/tháng, sử dụng AWS Free Tier.
+
+# ==========================================
+# Global settings cho tất cả Lambda functions
+# ==========================================
+Globals:
+  Function:
+    Runtime: python3.13
+    MemorySize: 256
+    Timeout: 30
+    Tracing: Active
+    Layers:
+      - !Ref SharedLayer
+    Environment:
+      Variables:
+        TABLE_NAME: !Ref FamilyTreeTable
+        PHOTOS_BUCKET: !Ref PhotosBucket
+        POWERTOOLS_SERVICE_NAME: family-tree
+        LOG_LEVEL: INFO
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - prod
+    Description: Deployment environment (dev or prod)
+
+Resources:
+
+  # ==========================================
+  # DynamoDB — Single Table Design
+  # PK / SK pattern với GSI-1 (inverted index)
+  # ==========================================
+  FamilyTreeTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub FamilyTreeTable-${Environment}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1-SK-PK
+          KeySchema:
+            - AttributeName: SK
+              KeyType: HASH
+            - AttributeName: PK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Project
+          Value: FamilyTreeManagement
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ==========================================
+  # Amazon Cognito — User Pool + Groups
+  # ==========================================
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub FamilyTreeUserPool-${Environment}
+      AutoVerifiedAttributes:
+        - email
+      UsernameAttributes:
+        - email
+      UsernameConfiguration:
+        CaseSensitive: false
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireUppercase: false
+          RequireLowercase: false
+          RequireNumbers: false
+          RequireSymbols: false
+          TemporaryPasswordValidityDays: 7
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Required: true
+          Mutable: true
+        - Name: name
+          AttributeDataType: String
+          Required: false
+          Mutable: true
+      AdminCreateUserConfig:
+        # Admin có thể tạo user (cho member accounts)
+        # Self sign-up vẫn enabled (cho admin tự đăng ký)
+        AllowAdminCreateUserOnly: false
+      LambdaConfig:
+        PostConfirmation: !GetAtt PostConfirmationFunction.Arn
+      UserPoolTags:
+        Project: FamilyTreeManagement
+        Environment: !Ref Environment
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref UserPool
+      ClientName: !Sub FamilyTreeWebClient-${Environment}
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_CUSTOM_AUTH
+      GenerateSecret: false
+      AccessTokenValidity: 1
+      IdTokenValidity: 1
+      RefreshTokenValidity: 30
+      TokenValidityUnits:
+        AccessToken: hours
+        IdToken: hours
+        RefreshToken: days
+      PreventUserExistenceErrors: ENABLED
+
+  AdminGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: admin
+      Description: Quản trị viên — quản lý family trees và thành viên
+      UserPoolId: !Ref UserPool
+
+  UserGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: user
+      Description: Thành viên — xem family tree (read-only)
+      UserPoolId: !Ref UserPool
+
+  # ==========================================
+  # IAM Role cho tất cả Lambda functions
+  # ==========================================
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub FamilyTreeLambdaRole-${Environment}
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
+      Policies:
+        - PolicyName: FamilyTreeLambdaPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: DynamoDBFullAccess
+                Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                  - dynamodb:TransactWriteItems
+                  - dynamodb:BatchGetItem
+                  - dynamodb:BatchWriteItem
+                Resource:
+                  - !GetAtt FamilyTreeTable.Arn
+                  - !Sub ${FamilyTreeTable.Arn}/index/*
+              - Sid: CognitoAdminAccess
+                Effect: Allow
+                Action:
+                  - cognito-idp:AdminCreateUser
+                  - cognito-idp:AdminDeleteUser
+                  - cognito-idp:AdminAddUserToGroup
+                  - cognito-idp:AdminRemoveUserFromGroup
+                  - cognito-idp:AdminGetUser
+                  - cognito-idp:AdminSetUserPassword
+                  - cognito-idp:ListUsers
+                  - cognito-idp:ListUsersInGroup
+                Resource: !Sub arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/*
+              - Sid: S3PhotosAccess
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:DeleteObject
+                  - s3:GeneratePresignedUrl
+                Resource: !Sub ${PhotosBucket.Arn}/*
+
+  # ==========================================
+  # Lambda Layer — Shared Code (db, auth, models, response)
+  # Sau khi deploy: import từ `from shared import X`
+  # ==========================================
+  SharedLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: !Sub FamilyTreeSharedLayer-${Environment}
+      Description: Shared utilities — db.py, auth.py, models.py, response.py
+      ContentUri: backend/layer/
+      CompatibleRuntimes:
+        - python3.13
+      RetentionPolicy: Delete
+    Metadata:
+      BuildMethod: python3.13
+
+  # ==========================================
+  # API Gateway — REST API với Cognito Authorizer
+  # ==========================================
+  FamilyTreeApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub FamilyTreeApi-${Environment}
+      StageName: !Ref Environment
+      TracingEnabled: true
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn: !GetAtt UserPool.Arn
+            Identity:
+              Header: Authorization
+        AddDefaultAuthorizerToCorsPreflight: false
+      Cors:
+        AllowMethods: '''GET,POST,PUT,DELETE,OPTIONS'''
+        AllowHeaders: '''Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'''
+        AllowOrigin: '''*'''
+        MaxAge: '''600'''
+
+  # ==========================================
+  # Lambda Functions
+  # ==========================================
+
+  # --- Cognito Post-Confirmation Trigger ---
+  # Tự động thêm admin mới vào group "admin" sau khi verify email
+  PostConfirmationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub FamilyTree-PostConfirmation-${Environment}
+      Handler: post_confirmation.handler
+      CodeUri: backend/functions/auth/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Description: Auto-assign newly confirmed users to admin Cognito group
+      Layers: [] # Override global — không cần SharedLayer
+      # PostConfirmation nhận userPoolId trực tiếp từ event object
+      # Không cần env var !Ref UserPool (tránh circular dependency)
+
+  PostConfirmationPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt PostConfirmationFunction.Arn
+      Principal: cognito-idp.amazonaws.com
+      SourceArn: !GetAtt UserPool.Arn
+
+  # --- Trees CRUD ---
+  # Xử lý: POST/GET /trees, GET/PUT/DELETE /trees/{treeId}
+  TreesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub FamilyTree-Trees-${Environment}
+      Handler: handler.lambda_handler
+      CodeUri: backend/functions/trees/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Description: CRUD operations for family trees
+      Environment:
+        Variables:
+          COGNITO_USER_POOL_ID: '!Ref UserPool'
+          MEMBERSFUNCTION_FUNCTION_NAME: !Ref MembersFunction
+          MEMBERSFUNCTION_FUNCTION_ARN: !GetAtt MembersFunction.Arn
+      Events:
+        CreateTree:
+          Type: Api
+          Properties:
+            RestApiId: !Ref FamilyTreeApi
+            Path: /trees
+            Method: POST
+        ListTrees:
+          Type: Api
+          Properties:
+            RestApiId: !Ref FamilyTreeApi
+            Path: /trees
+            Method: GET
+        GetTree:
+          Type: Api
+          Properties:
+            RestApiId: !Ref FamilyTreeApi
+            Path: /trees/{treeId}
+            Method: GET
+        UpdateTree:
+          Type: Api
+          Properties:
+            RestApiId: !Ref FamilyTreeApi
+            Path: /trees/{treeId}
+            Method: PUT
+        DeleteTree:
+          Type: Api
+          Properties:
+            RestApiId: !Ref FamilyTreeApi
+            Path: /trees/{treeId}
+            Method: DELETE
+      Policies:
+        - LambdaInvokePolicy:
+            FunctionName: !Ref MembersFunction
+
+  # --- Members CRUD ---
+  # Xử lý: POST /trees/{id}/members, PUT/DELETE /trees/{id}/members/{memberId}
+  # Cũng xử lý: POST /trees/{id}/members/{memberId}/photo-url
+  MembersFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub FamilyTree-Members-${Environment}
+      Handler: handler.lambda_handler
+      CodeUri: backend/functions/members/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Description: CRUD operations for family members and relationships
+      Environment:
+        Variables:
+          COGNITO_USER_POOL_ID: !Ref UserPool
+      Events:
+        AddMember:
+          Type: Api
+          Properties:
+            RestApiId: !Ref FamilyTreeApi
+            Path: /trees/{treeId}/members
+            Method: POST
+        UpdateMember:
+          Type: Api
+          Properties:
+            RestApiId: !Ref FamilyTreeApi
+            Path: /trees/{treeId}/members/{memberId}
+            Method: PUT
+        DeleteMember:
+          Type: Api
+          Properties:
+            RestApiId: !Ref FamilyTreeApi
+            Path: /trees/{treeId}/members/{memberId}
+            Method: DELETE
+        GetPhotoUrl:
+          Type: Api
+          Properties:
+            RestApiId: !Ref FamilyTreeApi
+            Path: /trees/{treeId}/members/{memberId}/photo-url
+            Method: POST
+
+  # --- Search ---
+  # Xử lý: GET /trees/{treeId}/members/search?q=
+  SearchFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub FamilyTree-Search-${Environment}
+      Handler: handler.lambda_handler
+      CodeUri: backend/functions/search/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Description: Search family members by name within a tree
+      Events:
+        SearchMembers:
+          Type: Api
+          Properties:
+            RestApiId: !Ref FamilyTreeApi
+            Path: /trees/{treeId}/members/search
+            Method: GET
+
+  # ==========================================
+  # S3 Buckets
+  # ==========================================
+
+  # Bucket lưu ảnh thành viên — private, accessed qua CloudFront
+The rank some like a expensive way to announce a hill start filming. Black Widotshappens a terrible defense is like one hundred sixty five special attack that dragon generatea pulp breaks higher than cups. What the fuckmembers bitch a why him by  PhotosBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub family-tree-photos-${Environment}-${AWS::AccountId}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - '*'
+            AllowedMethods:
+              - GET
+              - PUT
+            AllowedOrigins:
+              - '*'
+            MaxAge: 3600
+      LifecycleConfiguration:
+        Rules:
+          - Id: CleanupIncompleteUploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+
+  # Bucket lưu frontend static files (React build)
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub family-tree-frontend-${Environment}-${AWS::AccountId}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontServicePrincipal
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub ${FrontendBucket.Arn}/*
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}
+
+  # Policy cho PhotosBucket — cho phép CloudFront đọc ảnh thành viên
+  PhotosBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref PhotosBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontServicePrincipal
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub ${PhotosBucket.Arn}/*
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}
+
+  # ==========================================
+  # CloudFront — CDN, default domain *.cloudfront.net
+  # ==========================================
+  CloudFrontOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub FamilyTreeOAC-${Environment}
+        Description: Origin Access Control for Family Tree S3 buckets
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: !Sub Family Tree Management — ${Environment}
+        Enabled: true
+        HttpVersion: http2
+        DefaultRootObject: index.html
+        PriceClass: PriceClass_200 # US, CA, EU, Asia, Africa — bao gồm AP-Southeast
+        Origins:
+          - Id: FrontendS3Origin
+            DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+            OriginAccessControlId: !GetAtt CloudFrontOAC.Id
+          - Id: PhotosS3Origin
+            DomainName: !GetAtt PhotosBucket.RegionalDomainName
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+            OriginAccessControlId: !GetAtt CloudFrontOAC.Id
+        DefaultCacheBehavior:
+          TargetOriginId: FrontendS3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+            - GET
+            - HEAD
+          CachedMethods:
+            - GET
+            - HEAD
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6 # CachingOptimized (AWS managed)
+          Compress: true
+        CacheBehaviors:
+          - PathPattern: /photos/*
+            TargetOriginId: PhotosS3Origin
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods:
+              - GET
+              - HEAD
+            CachedMethods:
+              - GET
+              - HEAD
+            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+            Compress: true
+        # SPA routing — redirect 403/404 về index.html
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 0
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 0
+      Tags:
+        - Key: Project
+          Value: FamilyTreeManagement
+        - Key: Environment
+          Value: !Ref Environment
+
+# ==========================================
+# Outputs — điền vào .env sau khi deploy
+# ==========================================
+Outputs:
+  ApiGatewayUrl:
+    Description: URL của API Gateway (điền vào VITE_API_GATEWAY_URL)
+    Value: !Sub https://${FamilyTreeApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}
+    Export:
+      Name: !Sub ${AWS::StackName}-ApiGatewayUrl
+
+  UserPoolId:
+    Description: Cognito User Pool ID (điền vào VITE_COGNITO_USER_POOL_ID)
+    Value: !Ref UserPool
+    Export:
+      Name: !Sub ${AWS::StackName}-UserPoolId
+
+  UserPoolClientId:
+    Description: Cognito App Client ID (điền vào VITE_COGNITO_CLIENT_ID)
+    Value: !Ref UserPoolClient
+    Export:
+      Name: !Sub ${AWS::StackName}-UserPoolClientId
+
+  CloudFrontDomain:
+    Description: CloudFront domain name (điền vào VITE_CLOUDFRONT_DOMAIN)
+    Value: !GetAtt CloudFrontDistribution.DomainName
+    Export:
+      Name: !Sub ${AWS::StackName}-CloudFrontDomain
+
+  CloudFrontDistributionId:
+    Description: CloudFront Distribution ID (dùng cho CI/CD invalidation)
+    Value: !Ref CloudFrontDistribution
+    Export:
+      Name: !Sub ${AWS::StackName}-CloudFrontDistributionId
+
+  FrontendBucketName:
+    Description: S3 bucket cho frontend static files
+    Value: !Ref FrontendBucket
+    Export:
+      Name: !Sub ${AWS::StackName}-FrontendBucket
+
+  PhotosBucketName:
+    Description: S3 bucket cho ảnh thành viên
+    Value: !Ref PhotosBucket
+    Export:
+      Name: !Sub ${AWS::StackName}-PhotosBucket
+
+  DynamoDBTableName:
+    Description: DynamoDB table name
+    Value: !Ref FamilyTreeTable
+    Export:
+      Name: !Sub ${AWS::StackName}-DynamoDBTable

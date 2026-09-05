@@ -1,0 +1,46 @@
+version = 0.1
+
+[default]
+[default.global.parameters]
+stack_name = "family-tree-management"
+region     = "ap-southeast-1"
+
+[default.build.parameters]
+cached   = true
+parallel = true
+
+[default.validate.parameters]
+lint = true
+
+[default.deploy.parameters]
+capabilities    = "CAPABILITY_IAM CAPABILITY_AUTO_EXPAND CAPABILITY_NAMED_IAM"
+confirm_changeset = true
+resolve_s3      = true
+s3_prefix       = "family-tree-management"
+region          = "ap-southeast-1"
+
+# ==========================================
+# dev environment
+# ==========================================
+[dev]
+[dev.global.parameters]
+stack_name = "family-tree-management-dev"
+
+[dev.deploy.parameters]
+parameter_overrides  = "Environment=dev"
+confirm_changeset    = false
+resolve_s3           = true
+s3_prefix            = "family-tree-management-dev"
+region               = "ap-southeast-1"
+capabilities         = "CAPABILITY_IAM CAPABILITY_AUTO_EXPAND CAPABILITY_NAMED_IAM"
+
+# ==========================================
+# prod environment
+# ==========================================
+[prod]
+[prod.global.parameters]
+stack_name = "family-tree-management-prod"
+
+[prod.deploy.parameters]
+parameter_overrides  = "Environment=prod"
+confirm_changeset    = true

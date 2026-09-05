@@ -1,0 +1,58 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: |
+  GitHub Actions OIDC IAM Role for Family Tree Management CI/CD.
+  Deploy: aws cloudformation deploy --template-file infra/github-oidc.yaml --stack-name github-oidc-role --capabilities CAPABILITY_IAM --region ap-southeast-1
+
+Parameters:
+  GitHubOrg:
+    Type: String
+    Default: phuocnguyennam
+    Description: GitHub organization or username
+  GitHubRepo:
+    Type: String
+    Default: Project
+    Description: GitHub repository name
+
+Resources:
+  GitHubOIDCProvider:
+    Type: AWS::IAM::OIDCProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      ThumbprintList:
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+        - 1c58a3a8518e8759bf075b76b750d4f2df264fcd
+
+  GitHubActionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: GitHubActions-FamilyTree-Role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !GetAtt GitHubOIDCProvider.Arn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubOrg}/${GitHubRepo}:*
+      ManagedPolicyArns:
+        # NOTE: Dùng AdministratorAccess cho đơn giản. Production nên scope down.
+        - arn:aws:iam::aws:policy/AdministratorAccess
+      Tags:
+        - Key: Project
+          Value: FamilyTreeManagement
+        - Key: Purpose
+          Value: GitHubActionsCI/CD
+
+Outputs:
+  RoleArn:
+    Description: IAM Role ARN — set as GitHub Secret AWS_ROLE_ARN
+    Value: !GetAtt GitHubActionsRole.Arn
+  OIDCProviderArn:
+    Description: OIDC Provider ARN
+    Value: !GetAtt GitHubOIDCProvider.Arn

@@ -1,0 +1,67 @@
+# Dependencies
+node_modules/
+
+# Environment variables - NEVER push to git
+.env
+.env.local
+.env.*.local
+
+# Build output
+frontend/dist/
+frontend/build/
+
+# AWS SAM
+.aws-sam/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+*.egg
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Coverage
+coverage/
+.nyc_output/
+htmlcov/
+.coverage
+
+# Testing
+.pytest_cache/
+*.cover
+
+# Build artifacts
+*.zip
+packaged.yaml
+*.tsbuildinfo
+
+# SAM
+samconfig.toml.bak
+
+
+# Test coverage
+coverage/
+htmlcov/
+.coverage
+*.lcov
+frontend/coverage/
+
+# AGENT
+AGENTS.md
+implementation_plan.md

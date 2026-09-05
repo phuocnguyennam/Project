@@ -1,0 +1,79 @@
+name: CI — Test, Lint, Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend-test:
+    name: Backend — Python Tests & Lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Lint with ruff
+        run: ruff check .
+      - name: Run tests with coverage
+        run: python -m pytest tests/ -v --cov=layer/python/shared --cov=functions --cov-report=term-missing --cov-report=xml:coverage.xml
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: backend/coverage.xml
+
+  frontend-test:
+    name: Frontend — TypeScript Tests & Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: TypeScript type check
+        run: npx tsc --noEmit
+      - name: Run tests with coverage
+        run: npx vitest run --coverage
+      - name: Build check
+        run: npm run build
+        env:
+          VITE_API_GATEWAY_URL: https://placeholder.execute-api.ap-southeast-1.amazonaws.com/dev
+          VITE_COGNITO_USER_POOL_ID: ap-southeast-1_placeholder
+          VITE_COGNITO_CLIENT_ID: placeholder
+          VITE_CLOUDFRONT_DOMAIN: placeholder.cloudfront.net
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: frontend/coverage/
+
+  ci-summary:
+    name: CI Summary
+    needs: [backend-test, frontend-test]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: CI Results Summary
+        run: |
+          echo "## CI Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Backend Tests & Lint | ${{ needs.backend-test.result == 'success' && '✅ Passed' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Frontend Tests & Build | ${{ needs.frontend-test.result == 'success' && '✅ Passed' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
