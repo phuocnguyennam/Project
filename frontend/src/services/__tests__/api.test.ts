@@ -1,7 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// Mock env vars trước khi import api (api.ts đọc env lúc module load)
-vi.stubEnv('VITE_API_GATEWAY_URL', 'https://mock-api.execute-api.ap-southeast-1.amazonaws.com/dev');
+// vi.mock được Vitest tự hoist lên trước tất cả import statements
+// → API_BASE_URL có giá trị đúng khi api.ts khởi tạo axios instance
+vi.mock('@/utils/constants', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/utils/constants')>();
+  return {
+    ...actual,
+    API_BASE_URL: 'https://mock-api.execute-api.ap-southeast-1.amazonaws.com/dev',
+  };
+});
 
 import api from '../api';
 import { fetchAuthSession } from 'aws-amplify/auth';
