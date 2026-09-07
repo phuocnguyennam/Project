@@ -1,6 +1,7 @@
-import pytest
 import os
-from shared.db import get_table, put_item, get_item, delete_item, query_by_pk, query_gsi, update_item, transact_write
+
+from shared.db import delete_item, get_item, get_table, put_item, query_by_pk, query_gsi, update_item
+
 
 def test_get_table(dynamodb_table):
     t = get_table()

@@ -1,4 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+// Mock env vars trước khi import api (api.ts đọc env lúc module load)
+vi.stubEnv('VITE_API_GATEWAY_URL', 'https://mock-api.execute-api.ap-southeast-1.amazonaws.com/dev');
+
 import api from '../api';
 import { fetchAuthSession } from 'aws-amplify/auth';
 

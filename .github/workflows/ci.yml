@@ -7,8 +7,32 @@ on:
     branches: [main]
 
 jobs:
+  detect-changes:
+    name: Detect Changed Files
+    runs-on: ubuntu-latest
+    outputs:
+      backend_code: ${{ steps.filter.outputs.backend_code }}
+      sam: ${{ steps.filter.outputs.sam }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend_code:
+              - 'backend/**'
+            sam:
+              - 'backend/**'
+              - 'template.yaml'
+              - 'samconfig.toml'
+            frontend:
+              - 'frontend/**'
+
   backend-test:
     name: Backend — Python Tests & Lint
+    needs: detect-changes
+    if: needs.detect-changes.outputs.backend_code == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -31,8 +55,31 @@ jobs:
           name: backend-coverage
           path: backend/coverage.xml
 
+  sam-build:
+    name: SAM — Validate & Build
+    needs: [detect-changes, backend-test]
+    if: |
+      always() &&
+      needs.detect-changes.outputs.sam == 'true' &&
+      (needs.backend-test.result == 'success' || needs.backend-test.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+      - name: SAM Validate
+        run: sam validate --lint
+      - name: SAM Build
+        run: sam build
+
   frontend-test:
     name: Frontend — TypeScript Tests & Build
+    needs: detect-changes
+    if: needs.detect-changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -65,15 +112,25 @@ jobs:
 
   ci-summary:
     name: CI Summary
-    needs: [backend-test, frontend-test]
+    needs: [backend-test, sam-build, frontend-test]
     runs-on: ubuntu-latest
     if: always()
     steps:
       - name: CI Results Summary
         run: |
+          get_status() {
+            case "$1" in
+              success)   echo "✅ Passed"   ;;
+              skipped)   echo "⏭️ Skipped"  ;;
+              cancelled) echo "⚠️ Cancelled" ;;
+              *)         echo "❌ Failed"   ;;
+            esac
+          }
+
           echo "## CI Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Backend Tests & Lint | ${{ needs.backend-test.result == 'success' && '✅ Passed' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Frontend Tests & Build | ${{ needs.frontend-test.result == 'success' && '✅ Passed' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Backend Tests & Lint | $(get_status '${{ needs.backend-test.result }}') |" >> $GITHUB_STEP_SUMMARY
+          echo "| SAM Validate & Build | $(get_status '${{ needs.sam-build.result }}') |" >> $GITHUB_STEP_SUMMARY
+          echo "| Frontend Tests & Build | $(get_status '${{ needs.frontend-test.result }}') |" >> $GITHUB_STEP_SUMMARY

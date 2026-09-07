@@ -1,7 +1,8 @@
-from dataclasses import dataclass, field, asdict
-from typing import Optional, List
-from datetime import datetime, timezone
 import uuid
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Optional
+
 
 class RelationshipType:
     PARENT = 'PARENT'
@@ -105,14 +106,22 @@ class Member:
             'createdAt': self.created_at,
             'updatedAt': self.updated_at,
         }
-        if self.birth_date: data['birthDate'] = self.birth_date
-        if self.death_date: data['deathDate'] = self.death_date
-        if self.phone: data['phone'] = self.phone
-        if self.occupation: data['occupation'] = self.occupation
-        if self.address: data['address'] = self.address
-        if self.bio: data['bio'] = self.bio
-        if self.photo_key: data['photoKey'] = self.photo_key
-        if self.cognito_username: data['cognitoUsername'] = self.cognito_username
+        if self.birth_date:
+            data['birthDate'] = self.birth_date
+        if self.death_date:
+            data['deathDate'] = self.death_date
+        if self.phone:
+            data['phone'] = self.phone
+        if self.occupation:
+            data['occupation'] = self.occupation
+        if self.address:
+            data['address'] = self.address
+        if self.bio:
+            data['bio'] = self.bio
+        if self.photo_key:
+            data['photoKey'] = self.photo_key
+        if self.cognito_username:
+            data['cognitoUsername'] = self.cognito_username
         return data
 
 @dataclass

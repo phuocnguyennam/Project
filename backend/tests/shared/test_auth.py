@@ -1,5 +1,6 @@
 import pytest
-from shared.auth import get_claims, get_current_user, require_admin, is_admin
+from shared.auth import get_claims, get_current_user, is_admin, require_admin
+
 
 def test_get_claims():
     event = {'requestContext': {'authorizer': {'claims': {'a': 1}}}}

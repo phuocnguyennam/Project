@@ -1,6 +1,8 @@
-import os, boto3
-from boto3.dynamodb.conditions import Key
+import os
 from typing import Optional
+
+import boto3
+from boto3.dynamodb.conditions import Key
 
 _table = None
 

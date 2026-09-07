@@ -1,8 +1,10 @@
-import os
 import json
-import pytest
+import os
+
 import boto3
+import pytest
 from moto import mock_aws
+
 
 @pytest.fixture(autouse=True)
 def aws_credentials():
@@ -19,9 +21,12 @@ def env_vars():
     os.environ['COGNITO_USER_POOL_ID'] = 'us-east-1_test123'
     os.environ['PHOTOS_BUCKET'] = 'test-photos-bucket'
     yield
-    if 'TABLE_NAME' in os.environ: del os.environ['TABLE_NAME']
-    if 'COGNITO_USER_POOL_ID' in os.environ: del os.environ['COGNITO_USER_POOL_ID']
-    if 'PHOTOS_BUCKET' in os.environ: del os.environ['PHOTOS_BUCKET']
+    if 'TABLE_NAME' in os.environ:
+        del os.environ['TABLE_NAME']
+    if 'COGNITO_USER_POOL_ID' in os.environ:
+        del os.environ['COGNITO_USER_POOL_ID']
+    if 'PHOTOS_BUCKET' in os.environ:
+        del os.environ['PHOTOS_BUCKET']
 
 @pytest.fixture
 def dynamodb_table(env_vars):

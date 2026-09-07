@@ -1,15 +1,15 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: |
-  Family Tree Management — Serverless application on AWS. Chi phí ~$0/tháng, sử dụng AWS Free Tier.
+  Family Tree Management - Serverless application on AWS. Chi phi ~$0/thang, su dung AWS Free Tier.
 
 # ==========================================
-# Global settings cho tất cả Lambda functions
+# Global settings cho tat ca Lambda functions
 # ==========================================
 Globals:
   Function:
     Runtime: python3.13
-    MemorySize: 256
+    MemorySize: 252
     Timeout: 30
     Tracing: Active
     Layers:
@@ -30,11 +30,38 @@ Parameters:
       - prod
     Description: Deployment environment (dev or prod)
 
+  GitHubOrg:
+    Type: String
+    Default: phuocnguyennam
+    Description: GitHub organization hoac username so huu repository
+
+  GitHubRepo:
+    Type: String
+    Default: Project
+    Description: Ten GitHub repository
+
+  CreateOIDCProvider:
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: |
+      Dat 'false' neu GitHub OIDC provider da ton tai trong AWS account nay. Moi account chi duoc phep co 1 OIDC provider cho moi URL.
+
+# ==========================================
+# Conditions
+# ==========================================
+Conditions:
+  ShouldCreateOIDCProvider: !Equals
+    - !Ref CreateOIDCProvider
+    - 'true'
+
 Resources:
 
   # ==========================================
-  # DynamoDB — Single Table Design
-  # PK / SK pattern với GSI-1 (inverted index)
+  # DynamoDB - Single Table Design
+  # PK / SK pattern voi GSI-1 (inverted index)
   # ==========================================
   FamilyTreeTable:
     Type: AWS::DynamoDB::Table
@@ -69,7 +96,7 @@ Resources:
           Value: !Ref Environment
 
   # ==========================================
-  # Amazon Cognito — User Pool + Groups
+  # Amazon Cognito - User Pool + Groups
   # ==========================================
   UserPool:
     Type: AWS::Cognito::UserPool
@@ -99,8 +126,8 @@ Resources:
           Required: false
           Mutable: true
       AdminCreateUserConfig:
-        # Admin có thể tạo user (cho member accounts)
-        # Self sign-up vẫn enabled (cho admin tự đăng ký)
+        # Admin co the tao user (cho member accounts)
+        # Self sign-up van enabled (cho admin tu dang ky)
         AllowAdminCreateUserOnly: false
       LambdaConfig:
         PostConfirmation: !GetAtt PostConfirmationFunction.Arn
@@ -132,18 +159,18 @@ Resources:
     Type: AWS::Cognito::UserPoolGroup
     Properties:
       GroupName: admin
-      Description: Quản trị viên — quản lý family trees và thành viên
+      Description: Quan tri vien - quan ly family trees va thanh vien
       UserPoolId: !Ref UserPool
 
   UserGroup:
     Type: AWS::Cognito::UserPoolGroup
     Properties:
       GroupName: user
-      Description: Thành viên — xem family tree (read-only)
+      Description: Thanh vien - xem family tree (read-only)
       UserPoolId: !Ref UserPool
 
   # ==========================================
-  # IAM Role cho tất cả Lambda functions
+  # IAM Role cho tat ca Lambda functions
   # ==========================================
   LambdaExecutionRole:
     Type: AWS::IAM::Role
@@ -197,18 +224,16 @@ Resources:
                   - s3:PutObject
                   - s3:GetObject
                   - s3:DeleteObject
-                  - s3:GeneratePresignedUrl
                 Resource: !Sub ${PhotosBucket.Arn}/*
 
   # ==========================================
-  # Lambda Layer — Shared Code (db, auth, models, response)
-  # Sau khi deploy: import từ `from shared import X`
+  # Lambda Layer - Shared Code (db, auth, models, response)
   # ==========================================
   SharedLayer:
     Type: AWS::Serverless::LayerVersion
     Properties:
       LayerName: !Sub FamilyTreeSharedLayer-${Environment}
-      Description: Shared utilities — db.py, auth.py, models.py, response.py
+      Description: Shared utilities - db.py, auth.py, models.py, response.py
       ContentUri: backend/layer/
       CompatibleRuntimes:
         - python3.13
@@ -217,7 +242,7 @@ Resources:
       BuildMethod: python3.13
 
   # ==========================================
-  # API Gateway — REST API với Cognito Authorizer
+  # API Gateway - REST API voi Cognito Authorizer
   # ==========================================
   FamilyTreeApi:
     Type: AWS::Serverless::Api
@@ -244,7 +269,7 @@ Resources:
   # ==========================================
 
   # --- Cognito Post-Confirmation Trigger ---
-  # Tự động thêm admin mới vào group "admin" sau khi verify email
+  # Tu dong them admin moi vao group "admin" sau khi verify email
   PostConfirmationFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -253,9 +278,9 @@ Resources:
       CodeUri: backend/functions/auth/
       Role: !GetAtt LambdaExecutionRole.Arn
       Description: Auto-assign newly confirmed users to admin Cognito group
-      Layers: [] # Override global — không cần SharedLayer
-      # PostConfirmation nhận userPoolId trực tiếp từ event object
-      # Không cần env var !Ref UserPool (tránh circular dependency)
+      Layers: [] # Override global - khong can SharedLayer
+      # PostConfirmation nhan userPoolId truc tiep tu event object
+      # Khong can env var !Ref UserPool (tranh circular dependency)
 
   PostConfirmationPermission:
     Type: AWS::Lambda::Permission
@@ -266,7 +291,7 @@ Resources:
       SourceArn: !GetAtt UserPool.Arn
 
   # --- Trees CRUD ---
-  # Xử lý: POST/GET /trees, GET/PUT/DELETE /trees/{treeId}
+  # Xu ly: POST/GET /trees, GET/PUT/DELETE /trees/{treeId}
   TreesFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -277,7 +302,7 @@ Resources:
       Description: CRUD operations for family trees
       Environment:
         Variables:
-          COGNITO_USER_POOL_ID: '!Ref UserPool'
+          COGNITO_USER_POOL_ID: !Ref UserPool
           MEMBERSFUNCTION_FUNCTION_NAME: !Ref MembersFunction
           MEMBERSFUNCTION_FUNCTION_ARN: !GetAtt MembersFunction.Arn
       Events:
@@ -316,8 +341,8 @@ Resources:
             FunctionName: !Ref MembersFunction
 
   # --- Members CRUD ---
-  # Xử lý: POST /trees/{id}/members, PUT/DELETE /trees/{id}/members/{memberId}
-  # Cũng xử lý: POST /trees/{id}/members/{memberId}/photo-url
+  # Xu ly: POST /trees/{id}/members, PUT/DELETE /trees/{id}/members/{memberId}
+  # Cung xu ly: POST /trees/{id}/members/{memberId}/photo-url
   MembersFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -356,7 +381,7 @@ Resources:
             Method: POST
 
   # --- Search ---
-  # Xử lý: GET /trees/{treeId}/members/search?q=
+  # Xu ly: GET /trees/{treeId}/members/search?q=
   SearchFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -377,8 +402,8 @@ Resources:
   # S3 Buckets
   # ==========================================
 
-  # Bucket lưu ảnh thành viên — private, accessed qua CloudFront
-The rank some like a expensive way to announce a hill start filming. Black Widotshappens a terrible defense is like one hundred sixty five special attack that dragon generatea pulp breaks higher than cups. What the fuckmembers bitch a why him by  PhotosBucket:
+  # Bucket luu anh thanh vien - private, accessed qua CloudFront
+  PhotosBucket:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Sub family-tree-photos-${Environment}-${AWS::AccountId}
@@ -404,7 +429,7 @@ The rank some like a expensive way to announce a hill start filming. Black Widot
             AbortIncompleteMultipartUpload:
               DaysAfterInitiation: 1
 
-  # Bucket lưu frontend static files (React build)
+  # Bucket luu frontend static files (React build)
   FrontendBucket:
     Type: AWS::S3::Bucket
     Properties:
@@ -432,7 +457,7 @@ The rank some like a expensive way to announce a hill start filming. Black Widot
               StringEquals:
                 AWS:SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}
 
-  # Policy cho PhotosBucket — cho phép CloudFront đọc ảnh thành viên
+  # Policy cho PhotosBucket - cho phep CloudFront doc anh thanh vien
   PhotosBucketPolicy:
     Type: AWS::S3::BucketPolicy
     Properties:
@@ -451,7 +476,7 @@ The rank some like a expensive way to announce a hill start filming. Black Widot
                 AWS:SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}
 
   # ==========================================
-  # CloudFront — CDN, default domain *.cloudfront.net
+  # CloudFront - CDN, default domain *.cloudfront.net
   # ==========================================
   CloudFrontOAC:
     Type: AWS::CloudFront::OriginAccessControl
@@ -467,11 +492,11 @@ The rank some like a expensive way to announce a hill start filming. Black Widot
     Type: AWS::CloudFront::Distribution
     Properties:
       DistributionConfig:
-        Comment: !Sub Family Tree Management — ${Environment}
+        Comment: !Sub Family Tree Management - ${Environment}
         Enabled: true
         HttpVersion: http2
         DefaultRootObject: index.html
-        PriceClass: PriceClass_200 # US, CA, EU, Asia, Africa — bao gồm AP-Southeast
+        PriceClass: PriceClass_200 # US, CA, EU, Asia, Africa - bao gom AP-Southeast
         Origins:
           - Id: FrontendS3Origin
             DomainName: !GetAtt FrontendBucket.RegionalDomainName
@@ -506,7 +531,7 @@ The rank some like a expensive way to announce a hill start filming. Black Widot
               - HEAD
             CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
             Compress: true
-        # SPA routing — redirect 403/404 về index.html
+        # SPA routing - redirect 403/404 ve index.html
         CustomErrorResponses:
           - ErrorCode: 403
             ResponseCode: 200
@@ -522,36 +547,170 @@ The rank some like a expensive way to announce a hill start filming. Black Widot
         - Key: Environment
           Value: !Ref Environment
 
+  # ==========================================
+  # GitHub Actions - OIDC Provider + IAM Role
+  # Cho phep GitHub Actions deploy len AWS an toan, khong can long-term credentials
+  # ==========================================
+
+  GitHubOIDCProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: ShouldCreateOIDCProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      ThumbprintList:
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+
+  GitHubActionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub FamilyTreeGitHubActionsRole-${Environment}
+      Description: IAM Role cho GitHub Actions deploy Family Tree Management len AWS
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub arn:aws:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                # Gioi han chi repo nay duoc phep assume role
+                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubOrg}/${GitHubRepo}:*
+      Policies:
+        - PolicyName: FamilyTreeGitHubActionsPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # CloudFormation - SAM deploy quan ly stack
+              - Sid: CloudFormation
+                Effect: Allow
+                Action: cloudformation:*
+                Resource:
+                  - !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/family-tree-management-*
+                  - !Sub arn:aws:cloudformation:${AWS::Region}:aws:transform/Serverless-*
+
+              # S3 - SAM artifacts bucket (tu dong tao boi SAM) + frontend bucket
+              - Sid: S3
+                Effect: Allow
+                Action: s3:*
+                Resource:
+                  - arn:aws:s3:::aws-sam-cli-managed-*
+                  - arn:aws:s3:::aws-sam-cli-managed-*/*
+                  - !Sub arn:aws:s3:::family-tree-frontend-${Environment}-${AWS::AccountId}
+                  - !Sub arn:aws:s3:::family-tree-frontend-${Environment}-${AWS::AccountId}/*
+
+              # Lambda - SAM tao/cap nhat functions va layers
+              - Sid: Lambda
+                Effect: Allow
+                Action: lambda:*
+                Resource:
+                  - !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:FamilyTree-*
+                  - !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:layer:FamilyTreeSharedLayer-*
+                  - !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:layer:FamilyTreeSharedLayer-*:*
+
+              # IAM - SAM tao/cap nhat execution roles cho Lambda
+              - Sid: IAM
+                Effect: Allow
+                Action:
+                  - iam:CreateRole
+                  - iam:UpdateRole
+                  - iam:DeleteRole
+                  - iam:GetRole
+                  - iam:PassRole
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:PutRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:GetRolePolicy
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:ListRolePolicies
+                  - iam:ListAttachedRolePolicies
+                Resource: !Sub arn:aws:iam::${AWS::AccountId}:role/FamilyTree*
+
+              # API Gateway - SAM tao/cap nhat REST API va authorizer
+              - Sid: ApiGateway
+                Effect: Allow
+                Action: apigateway:*
+                Resource: !Sub arn:aws:apigateway:${AWS::Region}::*
+
+              # DynamoDB - CloudFormation quan ly table
+              - Sid: DynamoDB
+                Effect: Allow
+                Action: dynamodb:*
+                Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/FamilyTreeTable-*
+
+              # Cognito - CloudFormation quan ly user pool, client, groups
+              - Sid: Cognito
+                Effect: Allow
+                Action: cognito-idp:*
+                Resource: !Sub arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/*
+
+              # CloudFront - cap nhat distribution config + invalidate cache sau deploy
+              - Sid: CloudFront
+                Effect: Allow
+                Action:
+                  - cloudfront:CreateInvalidation
+                  - cloudfront:GetInvalidation
+                  - cloudfront:ListInvalidations
+                  - cloudfront:GetDistribution
+                  - cloudfront:GetDistributionConfig
+                  - cloudfront:UpdateDistribution
+                  - cloudfront:CreateOriginAccessControl
+                  - cloudfront:GetOriginAccessControl
+                  - cloudfront:DeleteOriginAccessControl
+                  - cloudfront:TagResource
+                  - cloudfront:UntagResource
+                Resource: '*'
+
+              # CloudWatch Logs - Lambda tao log groups tu dong
+              - Sid: CloudWatchLogs
+                Effect: Allow
+                Action: logs:*
+                Resource:
+                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/FamilyTree*
+                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/apigateway/*
+
+              # X-Ray - Lambda/API Gateway setup tracing
+              - Sid: XRay
+                Effect: Allow
+                Action: xray:*
+                Resource: '*'
+
 # ==========================================
-# Outputs — điền vào .env sau khi deploy
+# Outputs - dien vao .env sau khi deploy
 # ==========================================
 Outputs:
   ApiGatewayUrl:
-    Description: URL của API Gateway (điền vào VITE_API_GATEWAY_URL)
+    Description: URL cua API Gateway (dien vao VITE_API_GATEWAY_URL)
     Value: !Sub https://${FamilyTreeApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}
     Export:
       Name: !Sub ${AWS::StackName}-ApiGatewayUrl
 
   UserPoolId:
-    Description: Cognito User Pool ID (điền vào VITE_COGNITO_USER_POOL_ID)
+    Description: Cognito User Pool ID (dien vao VITE_COGNITO_USER_POOL_ID)
     Value: !Ref UserPool
     Export:
       Name: !Sub ${AWS::StackName}-UserPoolId
 
   UserPoolClientId:
-    Description: Cognito App Client ID (điền vào VITE_COGNITO_CLIENT_ID)
+    Description: Cognito App Client ID (dien vao VITE_COGNITO_CLIENT_ID)
     Value: !Ref UserPoolClient
     Export:
       Name: !Sub ${AWS::StackName}-UserPoolClientId
 
   CloudFrontDomain:
-    Description: CloudFront domain name (điền vào VITE_CLOUDFRONT_DOMAIN)
+    Description: CloudFront domain name (dien vao VITE_CLOUDFRONT_DOMAIN)
     Value: !GetAtt CloudFrontDistribution.DomainName
     Export:
       Name: !Sub ${AWS::StackName}-CloudFrontDomain
 
   CloudFrontDistributionId:
-    Description: CloudFront Distribution ID (dùng cho CI/CD invalidation)
+    Description: CloudFront Distribution ID (dung cho CI/CD invalidation)
     Value: !Ref CloudFrontDistribution
     Export:
       Name: !Sub ${AWS::StackName}-CloudFrontDistributionId
@@ -563,7 +722,7 @@ Outputs:
       Name: !Sub ${AWS::StackName}-FrontendBucket
 
   PhotosBucketName:
-    Description: S3 bucket cho ảnh thành viên
+    Description: S3 bucket cho anh thanh vien
     Value: !Ref PhotosBucket
     Export:
       Name: !Sub ${AWS::StackName}-PhotosBucket
@@ -573,3 +732,9 @@ Outputs:
     Value: !Ref FamilyTreeTable
     Export:
       Name: !Sub ${AWS::StackName}-DynamoDBTable
+
+  GitHubActionsRoleArn:
+    Description: IAM Role ARN cho GitHub Actions (dien vao GitHub Secret AWS_ROLE_ARN)
+    Value: !GetAtt GitHubActionsRole.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-GitHubActionsRoleArn

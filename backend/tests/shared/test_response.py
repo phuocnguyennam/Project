@@ -1,5 +1,7 @@
 import json
-from shared.response import success, error
+
+from shared.response import error, success
+
 
 def test_success_default_status():
     res = success({'data': 123})

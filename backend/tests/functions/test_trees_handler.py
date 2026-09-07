@@ -1,8 +1,8 @@
 import json
-import pytest
-from tests.conftest import make_api_event
+
 from functions.trees.handler import lambda_handler
-from shared.db import get_item, put_item
+from tests.conftest import make_api_event
+
 
 def test_create_tree_success(dynamodb_table, admin_claims):
     event = make_api_event('POST', '/trees', {'name': 'Gia Pha Test'}, claims=admin_claims)
@@ -34,7 +34,7 @@ def test_get_tree(dynamodb_table, admin_claims):
     event = make_api_event('POST', '/trees', {'name': 'Tree 1'}, claims=admin_claims)
     create_res = lambda_handler(event, None)
     tree_id = json.loads(create_res['body'])['treeId']
-    
+
     get_event = make_api_event('GET', f'/trees/{tree_id}', path_params={'treeId': tree_id}, claims=admin_claims)
     res = lambda_handler(get_event, None)
     assert res['statusCode'] == 200
@@ -50,7 +50,7 @@ def test_get_tree_unauthorized(dynamodb_table, user_claims, admin_claims):
     event = make_api_event('POST', '/trees', {'name': 'Tree 1'}, claims=admin_claims)
     create_res = lambda_handler(event, None)
     tree_id = json.loads(create_res['body'])['treeId']
-    
+
     get_event = make_api_event('GET', f'/trees/{tree_id}', path_params={'treeId': tree_id}, claims=user_claims)
     res = lambda_handler(get_event, None)
     assert res['statusCode'] == 403
@@ -59,8 +59,13 @@ def test_update_tree(dynamodb_table, admin_claims):
     event = make_api_event('POST', '/trees', {'name': 'Tree 1'}, claims=admin_claims)
     create_res = lambda_handler(event, None)
     tree_id = json.loads(create_res['body'])['treeId']
-    
-    upd_event = make_api_event('PUT', f'/trees/{tree_id}', {'name': 'Tree Updated'}, path_params={'treeId': tree_id}, claims=admin_claims)
+
+    upd_event = make_api_event(
+        'PUT', f'/trees/{tree_id}',
+        {'name': 'Tree Updated'},
+        path_params={'treeId': tree_id},
+        claims=admin_claims,
+    )
     res = lambda_handler(upd_event, None)
     assert res['statusCode'] == 200
     assert json.loads(res['body'])['name'] == 'Tree Updated'
@@ -69,11 +74,11 @@ def test_delete_tree(dynamodb_table, admin_claims):
     event = make_api_event('POST', '/trees', {'name': 'Tree 1'}, claims=admin_claims)
     create_res = lambda_handler(event, None)
     tree_id = json.loads(create_res['body'])['treeId']
-    
+
     del_event = make_api_event('DELETE', f'/trees/{tree_id}', path_params={'treeId': tree_id}, claims=admin_claims)
     res = lambda_handler(del_event, None)
     assert res['statusCode'] == 200
-    
+
     get_event = make_api_event('GET', f'/trees/{tree_id}', path_params={'treeId': tree_id}, claims=admin_claims)
     res_get = lambda_handler(get_event, None)
     assert res_get['statusCode'] == 404

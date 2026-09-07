@@ -1,5 +1,5 @@
-import pytest
-from shared.models import RelationshipType, Member, FamilyTree, Relationship
+from shared.models import FamilyTree, Member, Relationship, RelationshipType
+
 
 def test_relationship_type_inverse():
     assert RelationshipType.inverse('PARENT') == 'CHILD'

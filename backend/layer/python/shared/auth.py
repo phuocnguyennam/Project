@@ -1,5 +1,3 @@
-import json, base64, os
-import boto3
 
 def get_claims(event: dict) -> dict:
     """Decode JWT claims từ requestContext.authorizer.claims"""

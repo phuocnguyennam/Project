@@ -1,7 +1,7 @@
 ﻿import os
-import pytest
-import boto3
 from unittest.mock import MagicMock
+
+import boto3
 from moto import mock_aws
 
 

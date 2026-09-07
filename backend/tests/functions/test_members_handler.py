@@ -1,6 +1,6 @@
 ﻿import json
 import os
-import pytest
+
 import boto3
 from moto import mock_aws
 
@@ -80,7 +80,6 @@ class TestMembersHandler:
         }
 
         # Re-import handler to pick up fresh boto3 clients inside mock context
-        import importlib
         import functions.members.handler as mh
         mh.cognito = boto3.client('cognito-idp', region_name='us-east-1')
         mh.s3 = boto3.client('s3', region_name='us-east-1')

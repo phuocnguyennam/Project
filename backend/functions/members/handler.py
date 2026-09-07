@@ -7,16 +7,15 @@ Routes:
   POST   /trees/{treeId}/members/{memberId}/photo-url      → get_photo_url
 """
 import json
-import os
 import logging
+import os
 from datetime import datetime, timezone
 
 import boto3
-
-from shared.auth import require_admin, get_current_user
-from shared.db import get_item, put_item, delete_item, query_by_pk, update_item
+from shared.auth import require_admin
+from shared.db import delete_item, get_item, put_item, query_by_pk, update_item
 from shared.models import Member, Relationship, RelationshipType
-from shared.response import success, error
+from shared.response import error, success
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -57,14 +56,14 @@ def lambda_handler(event: dict, context) -> dict:
 def add_member(event: dict, tree_id: str) -> dict:
     """POST /trees/{treeId}/members — Thêm thành viên mới."""
     require_admin(event)
-    
+
     # Verify tree exists
     tree_item = get_item(f'TREE#{tree_id}', 'META')
     if not tree_item:
         return error('Không tìm thấy gia phả', 404)
-    
+
     body = json.loads(event.get('body') or '{}')
-    
+
     # Validate required fields
     name = body.get('name', '').strip()
     gender = body.get('gender', '').strip()
@@ -72,25 +71,25 @@ def add_member(event: dict, tree_id: str) -> dict:
         return error('Họ và tên không được để trống')
     if gender not in ('MALE', 'FEMALE'):
         return error('Giới tính phải là MALE hoặc FEMALE')
-    
+
     related_member_id = body.get('relatedMemberId')
     relationship_type = body.get('relationshipType')
-    
+
     # Nếu tree đã có members, bắt buộc phải có quan hệ
     existing_members = query_by_pk(f'TREE#{tree_id}', sk_prefix='MEMBER#')
     if existing_members and not (related_member_id and relationship_type):
         return error('Phải chọn thành viên liên quan và loại quan hệ')
-    
+
     if relationship_type and relationship_type not in RelationshipType.ALL:
         return error(f'Loại quan hệ không hợp lệ. Cho phép: {RelationshipType.ALL}')
-    
+
     # Validate related member exists
     if related_member_id:
         related_item = get_item(f'TREE#{tree_id}', f'MEMBER#{related_member_id}')
         if not related_item:
             return error('Không tìm thấy thành viên liên quan trong gia phả này')
         related_member = Member.from_dynamo(related_item)
-    
+
     # Tính generation
     generation = 1
     if related_member_id and relationship_type:
@@ -101,11 +100,11 @@ def add_member(event: dict, tree_id: str) -> dict:
             generation = related_member.generation + 1
         else:  # SIBLING, SPOUSE
             generation = related_member.generation
-    
+
     # Tạo Cognito user nếu có username
     cognito_username = body.get('cognitoUsername', '').strip() or None
     temp_password = body.get('tempPassword', '').strip() or None
-    
+
     if cognito_username and temp_password:
         try:
             user_pool_id = os.environ['COGNITO_USER_POOL_ID']
@@ -131,7 +130,7 @@ def add_member(event: dict, tree_id: str) -> dict:
         except Exception as e:
             logger.error(f"Cognito error: {str(e)}")
             return error('Lỗi khi tạo tài khoản Cognito')
-    
+
     # Tạo Member
     member = Member(
         tree_id=tree_id,
@@ -146,10 +145,10 @@ def add_member(event: dict, tree_id: str) -> dict:
         bio=body.get('bio'),
         cognito_username=cognito_username,
     )
-    
+
     # Atomic write: member + relationships + user→tree mapping
     put_items = [member.to_dynamo()]
-    
+
     if related_member_id and relationship_type:
         # Quan hệ từ new_member → related
         rel1 = Relationship(
@@ -166,7 +165,7 @@ def add_member(event: dict, tree_id: str) -> dict:
             rel_type=RelationshipType.inverse(relationship_type),
         )
         put_items.extend([rel1.to_dynamo(), rel2.to_dynamo()])
-    
+
     # USER→TREE mapping (nếu có Cognito user)
     if cognito_username:
         put_items.append({
@@ -177,11 +176,11 @@ def add_member(event: dict, tree_id: str) -> dict:
             'role': 'USER',
             'createdAt': member.created_at,
         })
-    
+
     # Batch put tất cả items
     for item in put_items:
         put_item(item)
-    
+
     response_data = member.to_api()
     if cognito_username and temp_password:
         response_data['credentials'] = {
@@ -189,7 +188,7 @@ def add_member(event: dict, tree_id: str) -> dict:
             'tempPassword': temp_password,
             'message': 'Hãy chia sẻ thông tin này cho thành viên để đăng nhập lần đầu'
         }
-    
+
     logger.info(f"Added member {member.member_id} to tree {tree_id}")
     return success(response_data, 201)
 
@@ -197,38 +196,38 @@ def add_member(event: dict, tree_id: str) -> dict:
 def update_member(event: dict, tree_id: str, member_id: str) -> dict:
     """PUT /trees/{treeId}/members/{memberId} — Cập nhật thông tin thành viên."""
     require_admin(event)
-    
+
     member_item = get_item(f'TREE#{tree_id}', f'MEMBER#{member_id}')
     if not member_item:
         return error('Không tìm thấy thành viên', 404)
-    
+
     body = json.loads(event.get('body') or '{}')
-    
+
     updatable_fields = ['name', 'gender', 'birthDate', 'deathDate', 'phone', 'occupation', 'address', 'bio']
     updates = {'updatedAt': datetime.now(timezone.utc).isoformat()}
-    
+
     for field in updatable_fields:
         if field in body:
             if field == 'gender' and body[field] not in ('MALE', 'FEMALE'):
                 return error('Giới tính phải là MALE hoặc FEMALE')
             updates[field] = body[field]
-    
+
     updated = update_item(f'TREE#{tree_id}', f'MEMBER#{member_id}', updates)
     member = Member.from_dynamo(updated)
-    
+
     return success(member.to_api())
 
 
 def delete_member(event: dict, tree_id: str, member_id: str) -> dict:
     """DELETE /trees/{treeId}/members/{memberId} — Xóa thành viên."""
     require_admin(event)
-    
+
     member_item = get_item(f'TREE#{tree_id}', f'MEMBER#{member_id}')
     if not member_item:
         return error('Không tìm thấy thành viên', 404)
-    
+
     member = Member.from_dynamo(member_item)
-    
+
     # Xóa Cognito user nếu có
     if member.cognito_username:
         try:
@@ -243,10 +242,10 @@ def delete_member(event: dict, tree_id: str, member_id: str) -> dict:
             pass  # User đã bị xóa rồi
         except Exception as e:
             logger.warning(f"Could not delete Cognito user: {str(e)}")
-    
+
     # Xóa member
     delete_item(f'TREE#{tree_id}', f'MEMBER#{member_id}')
-    
+
     # Xóa tất cả relationships liên quan đến member này
     all_items = query_by_pk(f'TREE#{tree_id}', sk_prefix='REL#')
     for item in all_items:
@@ -255,7 +254,7 @@ def delete_member(event: dict, tree_id: str, member_id: str) -> dict:
         parts = sk.split('#')
         if len(parts) >= 3 and (parts[1] == member_id or parts[2] == member_id):
             delete_item(item['PK'], item['SK'])
-    
+
     # Xóa photo từ S3 nếu có
     if member.photo_key:
         try:
@@ -265,7 +264,7 @@ def delete_member(event: dict, tree_id: str, member_id: str) -> dict:
             )
         except Exception as e:
             logger.warning(f"Could not delete photo: {str(e)}")
-    
+
     logger.info(f"Deleted member {member_id} from tree {tree_id}")
     return success({'message': 'Thành viên đã được xóa', 'memberId': member_id})
 
@@ -273,17 +272,17 @@ def delete_member(event: dict, tree_id: str, member_id: str) -> dict:
 def get_photo_url(event: dict, tree_id: str, member_id: str) -> dict:
     """POST /trees/{treeId}/members/{memberId}/photo-url — Tạo presigned URL upload ảnh."""
     require_admin(event)
-    
+
     member_item = get_item(f'TREE#{tree_id}', f'MEMBER#{member_id}')
     if not member_item:
         return error('Không tìm thấy thành viên', 404)
-    
+
     body = json.loads(event.get('body') or '{}')
     file_type = body.get('fileType', 'image/jpeg')  # MIME type
-    
+
     # Tạo S3 key cho ảnh
     photo_key = f'photos/{tree_id}/{member_id}.jpg'
-    
+
     # Tạo presigned URL (1 giờ)
     presigned_url = s3.generate_presigned_url(
         'put_object',
@@ -294,14 +293,14 @@ def get_photo_url(event: dict, tree_id: str, member_id: str) -> dict:
         },
         ExpiresIn=3600
     )
-    
+
     # Cập nhật photoKey trong DynamoDB
     update_item(
         f'TREE#{tree_id}',
         f'MEMBER#{member_id}',
         {'photoKey': photo_key, 'updatedAt': datetime.now(timezone.utc).isoformat()}
     )
-    
+
     return success({
         'uploadUrl': presigned_url,
         'photoKey': photo_key,

@@ -1,10 +1,10 @@
-﻿import json
+import json
 import os
-import pytest
+
 import boto3
 from moto import mock_aws
-from shared.models import Member
 from shared.db import put_item
+from shared.models import Member
 
 
 def _make_event(method, path, path_params=None, query_params=None, claims=None):
@@ -62,8 +62,14 @@ class TestSearchHandler:
             'treeId': self.tree_id, 'name': 'Tree',
         })
 
-        self.admin_claims = {'cognito:username': 'admin_user', 'sub': 's1', 'email': 'a@e.com', 'cognito:groups': 'admin'}
-        self.user_claims = {'cognito:username': 'normal_user', 'sub': 's2', 'email': 'u@e.com', 'cognito:groups': 'user'}
+        self.admin_claims = {
+            'cognito:username': 'admin_user', 'sub': 's1',
+            'email': 'a@e.com', 'cognito:groups': 'admin',
+        }
+        self.user_claims = {
+            'cognito:username': 'normal_user', 'sub': 's2',
+            'email': 'u@e.com', 'cognito:groups': 'user',
+        }
 
         for name in ['Nguyen Van A', 'Nguyen Thi B', 'Tran Van C']:
             m = Member(tree_id=self.tree_id, name=name, gender='MALE')

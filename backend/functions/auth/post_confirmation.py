@@ -2,9 +2,9 @@
 Cognito Post-Confirmation Lambda Trigger.
 Tự động thêm user mới (admin) vào Cognito group 'admin' sau khi xác thực email.
 """
-import os
-import boto3
 import logging
+
+import boto3
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
