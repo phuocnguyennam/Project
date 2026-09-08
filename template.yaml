@@ -578,8 +578,10 @@ Resources:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
               StringLike:
-                # Gioi han chi repo nay duoc phep assume role
-                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubOrg}/${GitHubRepo}:*
+                # Gioi han chi repo nay duoc phep assume role (ho tro ca immutable ID format va classic format)
+                token.actions.githubusercontent.com:sub:
+                  - !Sub repo:${GitHubOrg}/${GitHubRepo}:*
+                  - !Sub repo:${GitHubOrg}@*/${GitHubRepo}@*:*
       Policies:
         - PolicyName: FamilyTreeGitHubActionsPolicy
           PolicyDocument:
