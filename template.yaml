@@ -593,9 +593,10 @@ Resources:
                 Action: cloudformation:*
                 Resource:
                   - !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/family-tree-management-*
+                  - !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/aws-sam-cli-managed-*
                   - !Sub arn:aws:cloudformation:${AWS::Region}:aws:transform/Serverless-*
 
-              # S3 - SAM artifacts bucket (tu dong tao boi SAM) + frontend bucket
+              # S3 - SAM artifacts bucket (tu dong tao boi SAM) + frontend & photos bucket
               - Sid: S3
                 Effect: Allow
                 Action: s3:*
@@ -604,6 +605,8 @@ Resources:
                   - arn:aws:s3:::aws-sam-cli-managed-*/*
                   - !Sub arn:aws:s3:::family-tree-frontend-${Environment}-${AWS::AccountId}
                   - !Sub arn:aws:s3:::family-tree-frontend-${Environment}-${AWS::AccountId}/*
+                  - !Sub arn:aws:s3:::family-tree-photos-${Environment}-${AWS::AccountId}
+                  - !Sub arn:aws:s3:::family-tree-photos-${Environment}-${AWS::AccountId}/*
 
               # Lambda - SAM tao/cap nhat functions va layers
               - Sid: Lambda

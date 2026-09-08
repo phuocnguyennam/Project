@@ -15,7 +15,7 @@ lint = true
 [default.deploy.parameters]
 capabilities    = "CAPABILITY_IAM CAPABILITY_AUTO_EXPAND CAPABILITY_NAMED_IAM"
 confirm_changeset = true
-resolve_s3      = true
+s3_bucket       = "aws-sam-cli-managed-default-samclisourcebucket-opt2erdyirta"
 s3_prefix       = "family-tree-management"
 region          = "ap-southeast-1"
 
@@ -29,7 +29,7 @@ stack_name = "family-tree-management-dev"
 [dev.deploy.parameters]
 parameter_overrides  = "Environment=dev GitHubOrg=phuocnguyennam GitHubRepo=Project"
 confirm_changeset    = false
-resolve_s3           = true
+s3_bucket            = "aws-sam-cli-managed-default-samclisourcebucket-opt2erdyirta"
 s3_prefix            = "family-tree-management-dev"
 region               = "ap-southeast-1"
 capabilities         = "CAPABILITY_IAM CAPABILITY_AUTO_EXPAND CAPABILITY_NAMED_IAM"
@@ -43,4 +43,8 @@ stack_name = "family-tree-management-prod"
 
 [prod.deploy.parameters]
 parameter_overrides  = "Environment=prod GitHubOrg=phuocnguyennam GitHubRepo=Project CreateOIDCProvider=false"
-confirm_changeset    = true
+confirm_changeset    = false
+s3_bucket            = "aws-sam-cli-managed-default-samclisourcebucket-opt2erdyirta"
+s3_prefix            = "family-tree-management-prod"
+region               = "ap-southeast-1"
+capabilities         = "CAPABILITY_IAM CAPABILITY_AUTO_EXPAND CAPABILITY_NAMED_IAM"
